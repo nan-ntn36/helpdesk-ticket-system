@@ -1,0 +1,204 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── RBAC ───────────────────────────────────────────────
+
+model Role {
+  id          Int              @id @default(autoincrement())
+  name        String           @unique
+  description String?
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  users       User[]
+  permissions RolePermission[]
+
+  @@map("roles")
+}
+
+model Permission {
+  id    Int              @id @default(autoincrement())
+  name  String           @unique
+  roles RolePermission[]
+
+  @@map("permissions")
+}
+
+model RolePermission {
+  roleId       Int
+  permissionId Int
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@map("role_permissions")
+}
+
+// ─── Users ──────────────────────────────────────────────
+
+model User {
+  id        Int      @id @default(autoincrement())
+  fullName  String
+  email     String   @unique
+  password  String
+  roleId    Int
+  role      Role     @relation(fields: [roleId], references: [id])
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Google OAuth
+  googleId  String?  @unique
+
+  // Email verification
+  isEmailVerified    Boolean   @default(false)
+  verificationToken  String?   @unique
+  verificationExpiry DateTime?
+
+  createdTickets  Ticket[]        @relation("CreatedBy")
+  assignedTickets Ticket[]        @relation("AssignedTo")
+  comments        TicketComment[]
+  sessions        UserSession[]
+  ticketHistories TicketHistory[]
+  notifications   Notification[]
+
+  @@map("users")
+}
+
+// ─── Tickets ────────────────────────────────────────────
+
+enum TicketStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  CLOSED
+}
+
+enum TicketPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+model Category {
+  id        Int      @id @default(autoincrement())
+  name      String   @unique
+  createdAt DateTime @default(now())
+  tickets   Ticket[]
+
+  @@map("categories")
+}
+
+model Ticket {
+  id          Int            @id @default(autoincrement())
+  title       String
+  description String         @db.Text
+  status      TicketStatus   @default(OPEN)
+  priority    TicketPriority @default(MEDIUM)
+
+  createdById  Int
+  createdBy    User @relation("CreatedBy", fields: [createdById], references: [id])
+
+  assignedToId Int?
+  assignedTo   User? @relation("AssignedTo", fields: [assignedToId], references: [id])
+
+  categoryId Int?
+  category   Category? @relation(fields: [categoryId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  comments    TicketComment[]
+  attachments Attachment[]
+  histories   TicketHistory[]
+  notifications Notification[]
+
+  @@map("tickets")
+}
+
+model TicketComment {
+  id        Int      @id @default(autoincrement())
+  content   String   @db.Text
+  ticketId  Int
+  ticket    Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  userId    Int
+  user      User     @relation(fields: [userId], references: [id])
+  createdAt DateTime @default(now())
+
+  @@map("ticket_comments")
+}
+
+model Attachment {
+  id        Int      @id @default(autoincrement())
+  fileName  String
+  filePath  String
+  mimeType  String
+  fileSize  Int
+  ticketId  Int
+  ticket    Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@map("attachments")
+}
+
+model TicketHistory {
+  id        Int      @id @default(autoincrement())
+  ticketId  Int
+  ticket    Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  userId    Int
+  user      User     @relation(fields: [userId], references: [id])
+  field     String
+  oldValue  String?  @db.Text
+  newValue  String?  @db.Text
+  createdAt DateTime @default(now())
+
+  @@map("ticket_histories")
+}
+
+// ─── Sessions ───────────────────────────────────────────
+
+model UserSession {
+  id        Int       @id @default(autoincrement())
+  userId    Int
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique @db.VarChar(500)
+  deviceInfo String?
+  ipAddress  String?
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  @@map("user_sessions")
+}
+
+// ─── Notifications ──────────────────────────────────────
+
+enum NotificationType {
+  NEW_TICKET
+  TICKET_ASSIGNED
+  NEW_COMMENT
+}
+
+model Notification {
+  id        Int              @id @default(autoincrement())
+  type      NotificationType
+  message   String
+  ticketId  Int
+  ticket    Ticket           @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  userId    Int
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  isRead    Boolean          @default(false)
+  createdAt DateTime         @default(now())
+
+  @@index([userId, isRead])
+  @@map("notifications")
+}
