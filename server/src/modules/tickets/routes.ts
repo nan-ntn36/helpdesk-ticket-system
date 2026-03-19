@@ -189,6 +189,9 @@ router.patch('/:id/status', authenticate, authorize('AGENT', 'ADMIN'), validate(
  */
 router.patch('/:id/assign', authenticate, authorize('ADMIN'), validate(assignTicketSchema), ticketsController.assignTicket);
 
+// ─── Delete All Tickets (ADMIN only) ─────────────────
+router.delete('/all', authenticate, authorize('ADMIN'), ticketsController.deleteAllTickets);
+
 // ─── Delete Ticket (ADMIN only) ──────────────────────
 router.delete('/:id', authenticate, authorize('ADMIN'), ticketsController.deleteTicket);
 

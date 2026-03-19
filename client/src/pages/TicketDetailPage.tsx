@@ -5,7 +5,7 @@ import { selectUserRole, selectUser } from '@/features/auth/authSelectors';
 import { ArrowLeft, Clock, Send, User, Trash2 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { getSocket } from '@/lib/socket';
+import { subscribeSocket, getSocket } from '@/lib/socket';
 import styles from './TicketDetailPage.module.css';
 
 export function TicketDetailPage() {
@@ -29,20 +29,29 @@ export function TicketDetailPage() {
 
   // Real-time comments via Socket.IO
   useEffect(() => {
-    const socket = getSocket();
-    if (!socket || !ticketId) return;
+    if (!ticketId) return;
 
-    socket.emit('join-ticket', ticketId);
+    const unsubscribe = subscribeSocket((socket, on) => {
+      socket.emit('join-ticket', ticketId);
 
-    const handleNewComment = () => {
-      qc.invalidateQueries({ queryKey: ['comments', ticketId] });
-    };
+      const handleNewComment = () => {
+        qc.invalidateQueries({ queryKey: ['comments', ticketId] });
+        qc.invalidateQueries({ queryKey: ['tickets', ticketId] });
+      };
 
-    socket.on('ticket:new-comment', handleNewComment);
+      const handleTicketUpdated = () => {
+        qc.invalidateQueries({ queryKey: ['tickets'] });
+        qc.invalidateQueries({ queryKey: ['tickets', ticketId] });
+      };
+
+      handleTicketUpdated();
+      on('ticket:new-comment', handleNewComment);
+      on('ticket:list-updated', handleTicketUpdated);
+    });
 
     return () => {
-      socket.emit('leave-ticket', ticketId);
-      socket.off('ticket:new-comment', handleNewComment);
+      getSocket()?.emit('leave-ticket', ticketId);
+      unsubscribe();
     };
   }, [ticketId, qc]);
 

@@ -80,7 +80,7 @@ export async function createComment(
         commentBy: comment.user.fullName,
       });
     }
-  } catch { /* socket not ready yet */ }
+  } catch (err) { console.error('[Notification] createComment notification error:', err); }
 
   return comment;
 }

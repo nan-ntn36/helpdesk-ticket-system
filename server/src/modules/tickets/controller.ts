@@ -84,3 +84,12 @@ export async function deleteTicket(req: AuthenticatedRequest, res: Response, nex
     next(error);
   }
 }
+
+export async function deleteAllTickets(_req: AuthenticatedRequest, res: Response, next: NextFunction) {
+  try {
+    const result = await ticketsService.deleteAllTickets();
+    res.json({ success: true, message: `Deleted ${result.deletedCount} tickets`, data: result });
+  } catch (error) {
+    next(error);
+  }
+}

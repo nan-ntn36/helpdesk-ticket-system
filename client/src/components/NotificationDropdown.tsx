@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Bell, Ticket, UserCheck, MessageSquare } from 'lucide-react';
-import { getSocket } from '@/lib/socket';
+import { subscribeSocket } from '@/lib/socket';
 import { notificationApi } from '@/api/endpoints';
 import styles from './NotificationDropdown.module.css';
 
@@ -35,21 +35,41 @@ export function NotificationDropdown() {
     loadNotifications();
   }, [loadNotifications]);
 
-  // Listen to real-time socket events and reload from DB
   useEffect(() => {
-    const socket = getSocket();
-    if (!socket) return;
+    const syncNotifications = () => {
+      if (document.visibilityState === 'visible') {
+        loadNotifications();
+      }
+    };
 
-    const reload = () => loadNotifications();
-
-    socket.on('notification:new-ticket', reload);
-    socket.on('notification:ticket-assigned', reload);
-    socket.on('notification:new-comment', reload);
+    const intervalId = window.setInterval(syncNotifications, 5000);
+    window.addEventListener('focus', syncNotifications);
+    document.addEventListener('visibilitychange', syncNotifications);
 
     return () => {
-      socket.off('notification:new-ticket', reload);
-      socket.off('notification:ticket-assigned', reload);
-      socket.off('notification:new-comment', reload);
+      window.clearInterval(intervalId);
+      window.removeEventListener('focus', syncNotifications);
+      document.removeEventListener('visibilitychange', syncNotifications);
+    };
+  }, [loadNotifications]);
+
+  // Listen to real-time socket events — reactively waits for socket
+  useEffect(() => {
+    const reload = (eventName: string) => (data: any) => {
+      console.log(`[NotificationDropdown] Received '${eventName}'`, data);
+      loadNotifications();
+    };
+
+    const unsubscribe = subscribeSocket((_socket, on) => {
+      console.log('[NotificationDropdown] Subscribing to notification events');
+      loadNotifications();
+      on('notification:new-ticket', reload('notification:new-ticket'));
+      on('notification:ticket-assigned', reload('notification:ticket-assigned'));
+      on('notification:new-comment', reload('notification:new-comment'));
+    });
+
+    return () => {
+      unsubscribe();
     };
   }, [loadNotifications]);
 
@@ -111,7 +131,14 @@ export function NotificationDropdown() {
 
   return (
     <div className={styles.wrapper} ref={dropdownRef}>
-      <button className={styles.bellBtn} onClick={() => setOpen(!open)}>
+      <button
+        className={styles.bellBtn}
+        onClick={() => {
+          const nextOpen = !open;
+          setOpen(nextOpen);
+          if (nextOpen) loadNotifications();
+        }}
+      >
         <Bell size={18} />
         {unreadCount > 0 && <span className={styles.badge}>{unreadCount > 9 ? '9+' : unreadCount}</span>}
       </button>

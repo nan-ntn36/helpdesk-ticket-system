@@ -31,7 +31,10 @@ export function useUpdateTicketStatus() {
   return useMutation({
     mutationFn: ({ id, status }: { id: number; status: string }) =>
       ticketApi.updateStatus(id, status),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['tickets'] }),
+    onSuccess: (_data, variables) => {
+      qc.invalidateQueries({ queryKey: ['tickets'] });
+      qc.invalidateQueries({ queryKey: ['tickets', variables.id] });
+    },
   });
 }
 
@@ -40,7 +43,21 @@ export function useAssignTicket() {
   return useMutation({
     mutationFn: ({ id, assignedToId }: { id: number; assignedToId: number | null }) =>
       ticketApi.assign(id, assignedToId),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['tickets'] }),
+    onSuccess: (_data, variables) => {
+      qc.invalidateQueries({ queryKey: ['tickets'] });
+      qc.invalidateQueries({ queryKey: ['tickets', variables.id] });
+    },
+  });
+}
+
+export function useDeleteAllTickets() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ticketApi.deleteAll,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['tickets'] });
+      qc.invalidateQueries({ queryKey: ['dashboard'] });
+    },
   });
 }
 

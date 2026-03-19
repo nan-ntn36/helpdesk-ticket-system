@@ -2,7 +2,7 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '../../lib/prisma';
 import { NotFoundError, ForbiddenError } from '../../common/errors';
 import { CreateTicketInput, UpdateTicketInput, TicketQuery } from './schema';
-import { emitToStaff, emitToUser, emitAll } from '../../lib/socket';
+import { emitToUser, emitAll } from '../../lib/socket';
 
 const ticketInclude = {
   createdBy: { select: { id: true, fullName: true, email: true } },
@@ -97,17 +97,8 @@ export async function createTicket(input: CreateTicketInput, userId: number) {
     include: ticketInclude,
   });
 
-  // Emit real-time notification to staff + save to DB
+  // Save notification to DB first, then emit real-time event
   try {
-    emitToStaff('notification:new-ticket', {
-      id: ticket.id,
-      title: ticket.title,
-      priority: ticket.priority,
-      createdBy: ticket.createdBy.fullName,
-      createdAt: ticket.createdAt,
-    });
-
-    // Save notification to DB for all ADMIN and AGENT users
     const staffUsers = await prisma.user.findMany({
       where: {
         role: { name: { in: ['ADMIN', 'AGENT'] } },
@@ -116,6 +107,7 @@ export async function createTicket(input: CreateTicketInput, userId: number) {
       },
       select: { id: true },
     });
+    console.log(`[Notification] createTicket: found ${staffUsers.length} staff users to notify`);
     if (staffUsers.length > 0) {
       await prisma.notification.createMany({
         data: staffUsers.map(u => ({
@@ -126,9 +118,22 @@ export async function createTicket(input: CreateTicketInput, userId: number) {
         })),
       });
     }
-  } catch { /* socket not ready yet */ }
 
-  try { emitAll('ticket:list-updated'); } catch {}
+    // Emit to each staff user individually via their personal room
+    for (const u of staffUsers) {
+      emitToUser(u.id, 'notification:new-ticket', {
+        id: ticket.id,
+        title: ticket.title,
+        priority: ticket.priority,
+        createdBy: ticket.createdBy.fullName,
+        createdAt: ticket.createdAt,
+      });
+    }
+  } catch (err) {
+    console.error('[Notification] createTicket notification error:', err);
+  }
+
+  try { emitAll('ticket:list-updated'); } catch (err) { console.error('[Socket] ticket:list-updated error:', err); }
 
   return ticket;
 }
@@ -228,14 +233,10 @@ export async function assignTicket(
     }),
   ]);
 
-  // Emit notification to assigned user + save to DB
+  // Save notification to DB first, then emit real-time event
   try {
     if (assignedToId) {
-      emitToUser(assignedToId, 'notification:ticket-assigned', {
-        id: updatedTicket.id,
-        title: updatedTicket.title,
-        assignedBy: userId,
-      });
+      console.log(`[Notification] assignTicket: creating notification for userId=${assignedToId}, ticketId=${updatedTicket.id}`);
       await prisma.notification.create({
         data: {
           userId: assignedToId,
@@ -244,10 +245,36 @@ export async function assignTicket(
           ticketId: updatedTicket.id,
         },
       });
-    }
-  } catch { /* socket not ready yet */ }
 
-  try { emitAll('ticket:list-updated'); } catch {}
+      emitToUser(assignedToId, 'notification:ticket-assigned', {
+        id: updatedTicket.id,
+        title: updatedTicket.title,
+        assignedBy: userId,
+      });
+
+      // Also notify the ticket creator that their ticket was assigned
+      if (updatedTicket.createdById !== userId && updatedTicket.createdById !== assignedToId) {
+        const assignee = updatedTicket.assignedTo;
+        await prisma.notification.create({
+          data: {
+            userId: updatedTicket.createdById,
+            type: 'TICKET_ASSIGNED',
+            message: `Ticket "${updatedTicket.title}" đã được phân công cho ${assignee?.fullName ?? 'nhân viên'}`,
+            ticketId: updatedTicket.id,
+          },
+        });
+        emitToUser(updatedTicket.createdById, 'notification:ticket-assigned', {
+          id: updatedTicket.id,
+          title: updatedTicket.title,
+          assignedBy: userId,
+        });
+      }
+    }
+  } catch (err) {
+    console.error('[Notification] assignTicket notification error:', err);
+  }
+
+  try { emitAll('ticket:list-updated'); } catch (err) { console.error('[Socket] ticket:list-updated error:', err); }
 
   return updatedTicket;
 }
@@ -267,4 +294,21 @@ export async function deleteTicket(ticketId: number) {
   try { emitAll('ticket:list-updated'); } catch {}
 
   return { id: ticketId };
+}
+
+export async function deleteAllTickets() {
+  // Cascade delete all related records, then all tickets
+  const result = await prisma.$transaction([
+    prisma.notification.deleteMany(),
+    prisma.ticketComment.deleteMany(),
+    prisma.ticketHistory.deleteMany(),
+    prisma.attachment.deleteMany(),
+    prisma.ticket.deleteMany(),
+  ]);
+
+  const deletedCount = result[4].count;
+
+  try { emitAll('ticket:list-updated'); } catch {}
+
+  return { deletedCount };
 }

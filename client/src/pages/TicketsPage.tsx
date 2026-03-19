@@ -1,11 +1,11 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { useTickets, useCategories } from '@/api/hooks';
+import { useTickets, useCategories, useDeleteAllTickets } from '@/api/hooks';
 import { useAppSelector } from '@/app/hooks';
 import { selectUserRole } from '@/features/auth/authSelectors';
-import { Plus, Search, Filter } from 'lucide-react';
+import { Plus, Search, Filter, Trash2, AlertTriangle } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
-import { getSocket } from '@/lib/socket';
+import { subscribeSocket } from '@/lib/socket';
 import styles from './TicketsPage.module.css';
 
 function useDebounce<T>(value: T, delay: number): T {
@@ -25,6 +25,8 @@ export function TicketsPage() {
   const [priority, setPriority] = useState('');
   const [searchInput, setSearchInput] = useState('');
   const debouncedSearch = useDebounce(searchInput, 300);
+  const [showDeleteAllModal, setShowDeleteAllModal] = useState(false);
+  const deleteAllMutation = useDeleteAllTickets();
 
   const { data, isLoading } = useTickets({
     page,
@@ -42,37 +44,33 @@ export function TicketsPage() {
 
   // Real-time: refresh ticket list when any ticket is created/updated/deleted
   useEffect(() => {
-    let cleanup: (() => void) | undefined;
-
-    const setup = () => {
-      const socket = getSocket();
-      if (!socket) return false;
-
+    const unsubscribe = subscribeSocket((_socket, on) => {
       const refresh = () => {
         console.log('[TicketsPage] ticket:list-updated received, refreshing...');
         qc.invalidateQueries({ queryKey: ['tickets'] });
       };
-      socket.on('ticket:list-updated', refresh);
-      cleanup = () => socket.off('ticket:list-updated', refresh);
-      return true;
-    };
+      on('ticket:list-updated', refresh);
+    });
 
-    // Try immediately, if socket not ready, retry every 2s
-    if (!setup()) {
-      const interval = setInterval(() => {
-        if (setup()) clearInterval(interval);
-      }, 2000);
-      return () => { clearInterval(interval); cleanup?.(); };
-    }
-
-    return () => { cleanup?.(); };
+    return () => { unsubscribe(); };
   }, [qc]);
 
   return (
     <div className="animate-fadeIn">
       <div className={styles.header}>
         <h1 className={styles.title}>Tickets</h1>
-        <Link to="/app/tickets/new" className="btn btn-primary"><Plus size={18} /> New Ticket</Link>
+        <div className={styles.headerActions}>
+          {role === 'ADMIN' && tickets.length > 0 && (
+            <button
+              className={`btn ${styles.btnDanger}`}
+              onClick={() => setShowDeleteAllModal(true)}
+              disabled={deleteAllMutation.isPending}
+            >
+              <Trash2 size={18} /> Xóa tất cả
+            </button>
+          )}
+          <Link to="/app/tickets/new" className="btn btn-primary"><Plus size={18} /> New Ticket</Link>
+        </div>
       </div>
 
       {/* Filters */}
@@ -162,6 +160,44 @@ export function TicketsPage() {
         <div className="card" style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-muted)' }}>
           <p>No tickets found.</p>
           <Link to="/app/tickets/new" className="btn btn-primary" style={{ marginTop: '1rem' }}><Plus size={16} /> Create First Ticket</Link>
+        </div>
+      )}
+      {/* Delete All Confirmation Modal */}
+      {showDeleteAllModal && (
+        <div className={styles.modalOverlay} onClick={() => setShowDeleteAllModal(false)}>
+          <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
+            <div className={styles.modalIcon}>
+              <AlertTriangle size={48} />
+            </div>
+            <h2 className={styles.modalTitle}>Xác nhận xóa tất cả</h2>
+            <p className={styles.modalText}>
+              Bạn có chắc chắn muốn xóa <strong>tất cả {pagination?.total ?? tickets.length} tickets</strong>?
+              Hành động này không thể hoàn tác.
+            </p>
+            <div className={styles.modalActions}>
+              <button
+                className="btn"
+                onClick={() => setShowDeleteAllModal(false)}
+                disabled={deleteAllMutation.isPending}
+              >
+                Hủy
+              </button>
+              <button
+                className={`btn ${styles.btnDanger}`}
+                onClick={() => {
+                  deleteAllMutation.mutate(undefined, {
+                    onSuccess: () => {
+                      setShowDeleteAllModal(false);
+                      setPage(1);
+                    },
+                  });
+                }}
+                disabled={deleteAllMutation.isPending}
+              >
+                {deleteAllMutation.isPending ? 'Đang xóa...' : 'Xóa tất cả'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

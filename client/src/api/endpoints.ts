@@ -60,6 +60,8 @@ export const ticketApi = {
     api.patch(`/tickets/${id}/assign`, { assignedToId }),
   delete: (id: number) =>
     api.delete(`/tickets/${id}`),
+  deleteAll: () =>
+    api.delete('/tickets/all'),
 };
 
 export const commentApi = {

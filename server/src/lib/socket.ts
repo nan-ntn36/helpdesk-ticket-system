@@ -32,12 +32,15 @@ export function initSocket(httpServer: HttpServer) {
     const userId = (socket as any).userId;
     const role = (socket as any).role;
 
+    console.log(`[Socket] User ${userId} (${role}) connected, socket id: ${socket.id}`);
     // Join personal room
     socket.join(`user:${userId}`);
+    console.log(`[Socket] User ${userId} joined room 'user:${userId}'`);
 
     // Staff room for ADMIN/AGENT
     if (role === 'ADMIN' || role === 'AGENT') {
       socket.join('staff');
+      console.log(`[Socket] User ${userId} joined room 'staff'`);
     }
 
     // Ticket detail rooms
@@ -63,10 +66,13 @@ export function getIO(): Server {
 }
 
 export function emitToStaff(event: string, data: any) {
-  getIO().to('staff').emit(event, data);
+  const room = getIO().to('staff');
+  console.log(`[Socket] emitToStaff event='${event}'`, JSON.stringify(data));
+  room.emit(event, data);
 }
 
 export function emitToUser(userId: number, event: string, data: any) {
+  console.log(`[Socket] emitToUser userId=${userId} event='${event}'`, JSON.stringify(data));
   getIO().to(`user:${userId}`).emit(event, data);
 }
 
